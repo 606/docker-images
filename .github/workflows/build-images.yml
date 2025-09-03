@@ -1,0 +1,87 @@
+name: build-images
+
+on:
+  workflow_call:
+    inputs:
+      images_matrix:
+        required: true
+        type: string
+  workflow_dispatch:
+    inputs:
+      images_matrix:
+        description: 'JSON array of images to build'
+        required: true
+        default: '[{"name": "ubuntu", "channel": "lts", "tag": "22.04", "base_image": "ubuntu"}]'
+  repository_dispatch:
+    types: [build-images]
+  
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        image: ${{ fromJson(inputs.images_matrix || github.event.client_payload.images_matrix) }}
+      fail-fast: false
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      
+    - name: Setup Docker Buildx
+      uses: docker/setup-buildx-action@v3
+      
+    - name: Log in to GitHub Container Registry
+      uses: docker/login-action@v3
+      with:
+        registry: ghcr.io
+        username: ${{ github.repository_owner }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+        
+    - name: Extract metadata
+      id: meta
+      uses: docker/metadata-action@v5
+      with:
+        images: ghcr.io/${{ github.repository_owner }}/docker-images/${{ matrix.image.name }}
+        tags: |
+          type=ref,event=branch
+          type=ref,event=pr
+          type=sha,prefix={{branch}}-
+          type=raw,value=latest,enable={{is_default_branch}}
+        labels: |
+          org.opencontainers.image.source=https://github.com/${{ github.repository }}
+          org.opencontainers.image.revision=${{ github.sha }}
+          org.opencontainers.image.created=${{ steps.meta.outputs.created }}
+          org.opencontainers.image.description=${{ matrix.image.name }} image from ${{ github.repository }}
+          
+    - name: Build and push image
+      uses: docker/build-push-action@v5
+      with:
+        context: ./docker/${{ matrix.image.name }}
+        file: ./docker/${{ matrix.image.name }}/Dockerfile.${{ matrix.image.channel }}
+        push: true
+        tags: ${{ steps.meta.outputs.tags }}
+        labels: ${{ steps.meta.outputs.labels }}
+        cache-from: type=gha
+        cache-to: type=gha,mode=max
+        
+    - name: Make package public
+      run: |
+        echo "🔓 Making package public..."
+        
+        package_name="docker-images/${{ matrix.image.name }}"
+        
+        # Use GitHub API to make package public
+        response=$(curl -X PUT \
+          -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+          -H "Accept: application/vnd.github.v3+json" \
+          "https://api.github.com/orgs/${{ github.repository_owner }}/packages/container/$package_name/visibility" \
+          -d '{"visibility":"public"}')
+        
+        if [ $? -eq 0 ]; then
+          echo "✅ Successfully made $package_name public"
+        else
+          echo "⚠️ Failed to make $package_name public: $response"
+        fi

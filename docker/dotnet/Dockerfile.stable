@@ -1,0 +1,12 @@
+ARG BASE_IMAGE=mcr.microsoft.com/dotnet/sdk:9.0
+FROM ${BASE_IMAGE}
+
+LABEL maintainer="606@github.com" 
+LABEL channel="stable"
+LABEL auto-update="true"
+
+# Install additional tools
+RUN dotnet tool install --global dotnet-ef \
+    && dotnet tool install --global dotnet-outdated-tool
+
+# Add your customizations here

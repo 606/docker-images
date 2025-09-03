@@ -1,0 +1,71 @@
+name: Scheduled Image Update
+
+on:
+  schedule:
+    # Monthly at 2:00 UTC - full update of all images
+    - cron: '0 2 1 * *'
+  workflow_dispatch:
+    inputs:
+      update_all:
+        description: 'Update all images regardless of changes'
+        required: false
+        default: 'true'
+
+jobs:
+  force-update-all:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Generate update matrix
+      id: matrix
+      run: |
+        # Read configuration and create matrix for all images
+        # Filter out any null values and ensure all required fields are present
+        images_matrix=$(jq -c '[.images[] | . as $img | .channels | to_entries[] | {"name": $img.name, "channel": .key, "tag": .value.tag, "base_image": $img.base_image}]' .github/configs/images.json)
+        
+        # Validate matrix
+        matrix_length=$(echo "$images_matrix" | jq length 2>/dev/null || echo "0")
+        
+        if [ "$matrix_length" -eq 0 ]; then
+          echo "❌ No valid images found in configuration"
+          exit 1
+        fi
+        
+        echo "matrix=$images_matrix" >> $GITHUB_OUTPUT
+        echo "Generated matrix for $matrix_length images"
+        echo "Matrix content: $images_matrix"
+    
+    - name: Trigger build workflow
+      uses: actions/github-script@v7
+      with:
+        script: |
+          const matrix = ${{ steps.matrix.outputs.matrix }};
+          
+          try {
+            // Validate matrix before using
+            if (!matrix || matrix === '') {
+              core.setFailed('Matrix is empty or invalid');
+              return;
+            }
+            
+            // Matrix is already an array, no need to parse
+            if (!Array.isArray(matrix) || matrix.length === 0) {
+              core.setFailed('Matrix is not a valid array or is empty');
+              return;
+            }
+            
+            await github.rest.repos.createDispatchEvent({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              event_type: 'build-images',
+              client_payload: {
+                images_matrix: JSON.stringify(matrix)
+              }
+            });
+            
+            console.log(`✅ Successfully triggered build workflow for ${matrix.length} images`);                
+          } catch (error) {
+            console.error('❌ Error triggering workflow:', error);                                                  
+            core.setFailed(`Failed to trigger build workflow: ${error.message}`);
+          }

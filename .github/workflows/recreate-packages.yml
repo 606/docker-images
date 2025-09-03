@@ -1,0 +1,273 @@
+name: Recreate Packages with Repository Link
+
+on:
+  workflow_dispatch:
+    inputs:
+      force_recreate:
+        description: 'Force recreate all packages'
+        required: false
+        default: 'true'
+  push:
+    branches: [ main ]
+    paths:
+      - 'docker/**'
+      - '.github/workflows/recreate-packages.yml'
+
+jobs:
+  recreate-packages:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      packages: write
+      id-token: write
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      
+    - name: Setup Docker Buildx
+      uses: docker/setup-buildx-action@v3
+      
+    - name: Log in to GitHub Container Registry
+      uses: docker/login-action@v3
+      with:
+        registry: ghcr.io
+        username: ${{ github.repository_owner }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+        
+    - name: Delete existing packages in docker-images namespace
+      run: |
+        echo "🗑️ Deleting existing packages in docker-images namespace..."
+        
+        # List existing packages in docker-images namespace
+        packages=$(curl -s -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+          -H "Accept: application/vnd.github.v3+json" \
+          "https://api.github.com/user/packages?package_type=container" | \
+          jq -r '.[] | select(.name | contains("docker-images")) | .name' 2>/dev/null || echo "")
+        
+        if [ -n "$packages" ]; then
+          echo "📦 Found packages in docker-images namespace: $packages"
+          
+          # Delete each package
+          for package in $packages; do
+            echo "🗑️ Deleting package: $package"
+            curl -X DELETE \
+              -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+              -H "Accept: application/vnd.github.v3+json" \
+              "https://api.github.com/user/packages/container/$package" || echo "⚠️ Failed to delete $package"
+          done
+          
+          # Wait for deletion to complete
+          echo "⏳ Waiting for packages to be deleted..."
+          sleep 30
+        else
+          echo "ℹ️ No existing packages in docker-images namespace found"
+        fi
+        
+    - name: Extract metadata with repository link
+      id: meta
+      uses: docker/metadata-action@v5
+      with:
+        images: |
+          ghcr.io/${{ github.repository_owner }}/docker-images/ubuntu
+          ghcr.io/${{ github.repository_owner }}/docker-images/dotnet-sdk
+        tags: |
+          type=ref,event=branch
+          type=ref,event=pr
+          type=sha,prefix={{branch}}-
+          type=raw,value=latest,enable={{is_default_branch}}
+        labels: |
+          org.opencontainers.image.source=https://github.com/${{ github.repository }}
+          org.opencontainers.image.revision=${{ github.sha }}
+          org.opencontainers.image.created=${{ steps.meta.outputs.created }}
+          org.opencontainers.image.description=Docker images from ${{ github.repository }}
+          org.opencontainers.image.vendor=606
+          org.opencontainers.image.licenses=MIT
+          
+    - name: Build and push Ubuntu LTS with repository link
+      uses: docker/build-push-action@v5
+      with:
+        context: ./docker/ubuntu
+        file: ./docker/ubuntu/Dockerfile.lts
+        push: true
+        tags: |
+          ghcr.io/${{ github.repository_owner }}/docker-images/ubuntu:lts
+          ghcr.io/${{ github.repository_owner }}/docker-images/ubuntu:22.04-lts
+          ghcr.io/${{ github.repository_owner }}/docker-images/ubuntu:lts-${{ github.run_number }}
+        labels: ${{ steps.meta.outputs.labels }}
+        cache-from: type=gha
+        cache-to: type=gha,mode=max
+        
+    - name: Build and push Ubuntu Stable with repository link
+      uses: docker/build-push-action@v5
+      with:
+        context: ./docker/ubuntu
+        file: ./docker/ubuntu/Dockerfile.stable
+        push: true
+        tags: |
+          ghcr.io/${{ github.repository_owner }}/docker-images/ubuntu:stable
+          ghcr.io/${{ github.repository_owner }}/docker-images/ubuntu:24.04-stable
+          ghcr.io/${{ github.repository_owner }}/docker-images/ubuntu:stable-${{ github.run_number }}
+        labels: ${{ steps.meta.outputs.labels }}
+        cache-from: type=gha
+        cache-to: type=gha,mode=max
+        
+    - name: Build and push Ubuntu Preview with repository link
+      uses: docker/build-push-action@v5
+      with:
+        context: ./docker/ubuntu
+        file: ./docker/ubuntu/Dockerfile.preview
+        push: true
+        tags: |
+          ghcr.io/${{ github.repository_owner }}/docker-images/ubuntu:preview
+          ghcr.io/${{ github.repository_owner }}/docker-images/ubuntu:24.10-preview
+          ghcr.io/${{ github.repository_owner }}/docker-images/ubuntu:preview-${{ github.run_number }}
+        labels: ${{ steps.meta.outputs.labels }}
+        cache-from: type=gha
+        cache-to: type=gha,mode=max
+        
+    - name: Build and push .NET SDK LTS with repository link
+      uses: docker/build-push-action@v5
+      with:
+        context: ./docker/dotnet
+        file: ./docker/dotnet/Dockerfile.lts
+        push: true
+        tags: |
+          ghcr.io/${{ github.repository_owner }}/docker-images/dotnet-sdk:lts
+          ghcr.io/${{ github.repository_owner }}/docker-images/dotnet-sdk:8.0-lts
+          ghcr.io/${{ github.repository_owner }}/docker-images/dotnet-sdk:lts-${{ github.run_number }}
+        labels: ${{ steps.meta.outputs.labels }}
+        cache-from: type=gha
+        cache-to: type=gha,mode=max
+        
+    - name: Build and push .NET SDK Stable with repository link
+      uses: docker/build-push-action@v5
+      with:
+        context: ./docker/dotnet
+        file: ./docker/dotnet/Dockerfile.stable
+        push: true
+        tags: |
+          ghcr.io/${{ github.repository_owner }}/docker-images/dotnet-sdk:stable
+          ghcr.io/${{ github.repository_owner }}/docker-images/dotnet-sdk:9.0-stable
+          ghcr.io/${{ github.repository_owner }}/docker-images/dotnet-sdk:stable-${{ github.run_number }}
+        labels: ${{ steps.meta.outputs.labels }}
+        cache-from: type=gha
+        cache-to: type=gha,mode=max
+        
+    - name: Build and push .NET SDK Preview with repository link
+      uses: docker/build-push-action@v5
+      with:
+        context: ./docker/dotnet
+        file: ./docker/dotnet/Dockerfile.preview
+        push: true
+        tags: |
+          ghcr.io/${{ github.repository_owner }}/docker-images/dotnet-sdk:preview
+          ghcr.io/${{ github.repository_owner }}/docker-images/dotnet-sdk:10.0-preview
+          ghcr.io/${{ github.repository_owner }}/docker-images/dotnet-sdk:preview-${{ github.run_number }}
+        labels: ${{ steps.meta.outputs.labels }}
+        cache-from: type=gha
+        cache-to: type=gha,mode=max
+        
+    - name: Wait for packages to be fully created
+      run: |
+        echo "⏳ Waiting for packages to be fully created..."
+        sleep 60
+        
+    - name: Make all packages public
+      run: |
+        echo "🔓 Making all packages public..."
+        
+        packages=("docker-images/ubuntu" "docker-images/dotnet-sdk")
+        
+        for package in "${packages[@]}"; do
+          echo "🔓 Making $package public..."
+          
+          # Use GitHub API to make package public
+          response=$(curl -X PUT \
+            -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+            -H "Accept: application/vnd.github.v3+json" \
+            "https://api.github.com/user/packages/container/$package/visibility" \
+            -d '{"visibility":"public"}')
+          
+          if [ $? -eq 0 ]; then
+            echo "✅ Successfully made $package public"
+          else
+            echo "⚠️ Failed to make $package public: $response"
+          fi
+        done
+        
+    - name: Verify package creation and linking
+      run: |
+        echo "🔍 Verifying package creation and repository linking..."
+        
+        # Wait a bit more for linking to complete
+        sleep 30
+        
+        # Check packages
+        packages_response=$(curl -s -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+          -H "Accept: application/vnd.github.v3+json" \
+          "https://api.github.com/user/packages?package_type=container")
+        
+        echo "📦 Package Status:"
+        echo "$packages_response" | jq -r '.[] | "  📦 \(.name) - \(.visibility) - Repo: \(.repository.name // "none")"'
+        
+        # Check if repository linking worked
+        linked_packages=$(echo "$packages_response" | jq -r '.[] | select(.repository.name == "docker-images") | .name')
+        
+        if [ -n "$linked_packages" ]; then
+          echo "✅ Successfully linked packages: $linked_packages"
+        else
+          echo "⚠️ No packages linked to repository yet"
+        fi
+        
+    - name: Update package documentation
+      run: |
+        cat > PACKAGE_STATUS.md << 'EOF'
+        # Package Recreation Status
+        
+        ## Recreated Packages (docker-images namespace)
+        
+        ### Ubuntu Images
+        - **LTS**: `ghcr.io/606/docker-images/ubuntu:lts` (linked to repository)
+        - **Stable**: `ghcr.io/606/docker-images/ubuntu:stable` (linked to repository)
+        - **Preview**: `ghcr.io/606/docker-images/ubuntu:preview` (linked to repository)
+        
+        ### .NET SDK Images
+        - **LTS**: `ghcr.io/606/docker-images/dotnet-sdk:lts` (linked to repository)
+        - **Stable**: `ghcr.io/606/docker-images/dotnet-sdk:stable` (linked to repository)
+        - **Preview**: `ghcr.io/606/docker-images/dotnet-sdk:preview` (linked to repository)
+        
+        ## Repository Link
+        
+        All packages are now properly linked to this repository:
+        - **Source**: https://github.com/606/docker-images
+        - **Packages**: https://github.com/606?tab=packages
+        
+        ## Visibility
+        
+        **All packages are PUBLIC by default** - no authentication required!
+        
+        ## Usage
+        
+        ```bash
+        # Pull images (no authentication required)
+        docker pull ghcr.io/606/docker-images/ubuntu:lts
+        docker pull ghcr.io/606/docker-images/dotnet-sdk:lts
+        ```
+        
+        ## Recreation Details
+        
+        - **Workflow**: Recreate Packages with Repository Link
+        - **Run Number**: ${{ github.run_number }}
+        - **Commit**: ${{ github.sha }}
+        - **Date**: $(date -u)
+        - **Action**: Deleted old packages and recreated with proper linking
+        - **Namespace**: docker-images (matches repository name)
+        EOF
+        
+    - name: Commit package status
+      run: |
+        git config --local user.email "action@github.com"
+        git config --local user.name "GitHub Action"
+        git add PACKAGE_STATUS.md
+        git commit -m "🔄 Update package recreation status" || echo "No changes to commit"
+        git push

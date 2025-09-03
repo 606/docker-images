@@ -1,0 +1,129 @@
+name: Package Visibility Management
+
+on:
+  workflow_dispatch:
+    inputs:
+      make_public:
+        description: 'Make all packages public'
+        required: false
+        default: 'true'
+  schedule:
+    - cron: '0 0 * * 0'  # Weekly on Sunday at midnight UTC
+  push:
+    branches: [ main ]
+    paths:
+      - '.github/workflows/package-visibility.yml'
+
+jobs:
+  manage-visibility:
+    runs-on: ubuntu-latest
+    permissions:
+      packages: write
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      
+    - name: Setup GitHub CLI
+      uses: cli/setup-gh@v2
+      with:
+        version: latest
+        
+    - name: Authenticate with GitHub
+      run: |
+        echo "${{ secrets.GITHUB_TOKEN }}" | gh auth login --with-token
+        
+    - name: Make all packages public
+      run: |
+        echo "🔓 Making all packages public in GHCR..."
+        
+        # Get list of all container packages
+        packages=$(gh api user/packages --jq '.[] | select(.package_type == "container") | .name' 2>/dev/null || echo "")
+        
+        if [ -n "$packages" ]; then
+          echo "📦 Found packages: $packages"
+          
+          for package in $packages; do
+            if [[ "$package" == *"ubuntu"* ]] || [[ "$package" == *"dotnet-sdk"* ]]; then
+              echo "🔓 Making package '$package' public..."
+              
+              # Check current visibility
+              current_visibility=$(gh api "user/packages/container/$package" --jq '.visibility' 2>/dev/null || echo "unknown")
+              echo "  Current visibility: $current_visibility"
+              
+              if [ "$current_visibility" != "public" ]; then
+                # Make package public
+                gh api --method PUT "user/packages/container/$package/visibility" \
+                  --field visibility="public" && echo "  ✅ Made public" || echo "  ❌ Failed to make public"
+              else
+                echo "  ℹ️ Already public"
+              fi
+            fi
+          done
+        else
+          echo "ℹ️ No container packages found or API access issue"
+        fi
+        
+    - name: Verify public packages
+      run: |
+        echo "🔍 Verifying package visibility..."
+        
+        packages=$(gh api user/packages --jq '.[] | select(.package_type == "container") | .name' 2>/dev/null || echo "")
+        
+        if [ -n "$packages" ]; then
+          for package in $packages; do
+            if [[ "$package" == *"ubuntu"* ]] || [[ "$package" == *"dotnet-sdk"* ]]; then
+              visibility=$(gh api "user/packages/container/$package" --jq '.visibility' 2>/dev/null || echo "unknown")
+              echo "📦 $package: $visibility"
+            fi
+          done
+        fi
+        
+    - name: Update package status
+      run: |
+        echo "📝 Updating package status..."
+        
+        # Create status file
+        cat > PACKAGE_STATUS.md << 'EOF'
+        # Package Visibility Status
+        
+        Last updated: $(date -u)
+        
+        ## Current Status
+        
+        EOF
+        
+        # Get package status
+        packages=$(gh api user/packages --jq '.[] | select(.package_type == "container") | .name' 2>/dev/null || echo "")
+        
+        if [ -n "$packages" ]; then
+          for package in $packages; do
+            if [[ "$package" == *"ubuntu"* ]] || [[ "$package" == *"dotnet-sdk"* ]]; then
+              visibility=$(gh api "user/packages/container/$package" --jq '.visibility' 2>/dev/null || echo "unknown")
+              updated_at=$(gh api "user/packages/container/$package" --jq '.updated_at' 2>/dev/null || echo "unknown")
+              
+              echo "### $package" >> PACKAGE_STATUS.md
+              echo "- **Visibility**: $visibility" >> PACKAGE_STATUS.md
+              echo "- **Last Updated**: $updated_at" >> PACKAGE_STATUS.md
+              echo "" >> PACKAGE_STATUS.md
+            fi
+          done
+        fi
+        
+        echo "## Public Access" >> PACKAGE_STATUS.md
+        echo "" >> PACKAGE_STATUS.md
+        echo "All packages are configured to be **PUBLIC** by default." >> PACKAGE_STATUS.md
+        echo "Anyone can pull these images without authentication:" >> PACKAGE_STATUS.md
+        echo "" >> PACKAGE_STATUS.md
+        echo '```bash' >> PACKAGE_STATUS.md
+        echo '# No authentication required' >> PACKAGE_STATUS.md
+        echo 'docker pull ghcr.io/606/ubuntu:lts' >> PACKAGE_STATUS.md
+        echo 'docker pull ghcr.io/606/dotnet-sdk:lts' >> PACKAGE_STATUS.md
+        echo '```' >> PACKAGE_STATUS.md
+        
+    - name: Commit status update
+      run: |
+        git config --local user.email "action@github.com"
+        git config --local user.name "GitHub Action"
+        git add PACKAGE_STATUS.md
+        git commit -m "🔓 Update package visibility status" || echo "No changes to commit"
+        git push

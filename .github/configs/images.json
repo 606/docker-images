@@ -1,0 +1,42 @@
+{
+  "images": [
+    {
+      "name": "ubuntu",
+      "base_image": "ubuntu",
+      "channels": {
+        "lts": {
+          "tag": "22.04",
+          "dockerfile": "docker/ubuntu/Dockerfile.lts"
+        },
+        "stable": {
+          "tag": "24.04", 
+          "dockerfile": "docker/ubuntu/Dockerfile.stable"
+        },
+        "preview": {
+          "tag": "24.10",
+          "dockerfile": "docker/ubuntu/Dockerfile.preview"
+        }
+      },
+      "registry": "ghcr.io/606"
+    },
+    {
+      "name": "dotnet-sdk",
+      "base_image": "mcr.microsoft.com/dotnet/sdk",
+      "channels": {
+        "lts": {
+          "tag": "8.0",
+          "dockerfile": "docker/dotnet/Dockerfile.lts"
+        },
+        "stable": {
+          "tag": "9.0",
+          "dockerfile": "docker/dotnet/Dockerfile.stable"
+        },
+        "preview": {
+          "tag": "10.0-preview",
+          "dockerfile": "docker/dotnet/Dockerfile.preview"
+        }
+      },
+      "registry": "ghcr.io/606"
+    }
+  ]
+}

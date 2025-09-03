@@ -1,0 +1,11 @@
+# ACT Configuration for faster execution
+--container-architecture linux/amd64
+--container-daemon-socket /var/run/docker.sock
+--env-file .env
+--secret-file .secrets
+--verbose
+--reuse
+--bind
+--platform ubuntu-latest=catthehacker/ubuntu:act-latest
+--platform ubuntu-20.04=catthehacker/ubuntu:act-20.04
+--platform ubuntu-18.04=catthehacker/ubuntu:act-18.04

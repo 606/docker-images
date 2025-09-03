@@ -1,0 +1,151 @@
+name: Clean Registry - Delete All Docker Images
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm_deletion:
+        description: 'I confirm I want to delete ALL Docker images from registry'
+        required: true
+        default: 'false'
+        type: boolean
+  push:
+    branches: [ main ]
+    paths:
+      - '.github/workflows/clean-registry.yml'
+
+jobs:
+  clean-registry:
+    runs-on: ubuntu-latest
+    permissions:
+      packages: write
+    if: ${{ inputs.confirm_deletion == 'true' }}
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      
+    - name: List all packages
+      run: |
+        echo "📦 Listing all packages in registry..."
+        
+        packages_response=$(curl -s -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+          -H "Accept: application/vnd.github.v3+json" \
+          "https://api.github.com/user/packages?package_type=container")
+        
+        echo "📋 Found packages:"
+        echo "$packages_response" | jq -r '.[] | "  📦 \(.name) - \(.visibility) - Repo: \(.repository.name // "none")"'
+        
+        # Count total packages
+        total_packages=$(echo "$packages_response" | jq length)
+        echo "📊 Total packages found: $total_packages"
+        
+    - name: Delete all Docker images
+      run: |
+        echo "🗑️ Starting deletion of ALL Docker images..."
+        
+        packages_response=$(curl -s -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+          -H "Accept: application/vnd.github.v3+json" \
+          "https://api.github.com/user/packages?package_type=container")
+        
+        deleted_count=0
+        failed_count=0
+        
+        # Delete each package
+        echo "$packages_response" | jq -r '.[].name' | while read package; do
+          if [ -n "$package" ]; then
+            echo "🗑️ Deleting package: $package"
+            
+            response=$(curl -X DELETE \
+              -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+              -H "Accept: application/vnd.github.v3+json" \
+              "https://api.github.com/user/packages/container/$package")
+            
+            if [ $? -eq 0 ]; then
+              echo "  ✅ Successfully deleted $package"
+              deleted_count=$((deleted_count + 1))
+            else
+              echo "  ❌ Failed to delete $package: $response"
+              failed_count=$((failed_count + 1))
+            fi
+            
+            # Wait a bit between deletions
+            sleep 2
+          fi
+        done
+        
+        echo "📊 Deletion Summary:"
+        echo "  ✅ Successfully deleted: $deleted_count"
+        echo "  ❌ Failed to delete: $failed_count"
+        
+    - name: Wait for deletion to complete
+      run: |
+        echo "⏳ Waiting for all deletions to complete..."
+        sleep 60
+        
+    - name: Verify registry is empty
+      run: |
+        echo "🔍 Verifying registry is empty..."
+        
+        packages_response=$(curl -s -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+          -H "Accept: application/vnd.github.v3+json" \
+          "https://api.github.com/user/packages?package_type=container")
+        
+        remaining_packages=$(echo "$packages_response" | jq length)
+        
+        if [ "$remaining_packages" -eq 0 ]; then
+          echo "✅ Registry is now empty!"
+        else
+          echo "⚠️ Registry still has $remaining_packages packages:"
+          echo "$packages_response" | jq -r '.[] | "  📦 \(.name)"'
+        fi
+        
+    - name: Update cleanup status
+      run: |
+        cat > REGISTRY_CLEANUP.md << 'EOF'
+        # Registry Cleanup Status
+        
+        ## Action Performed
+        
+        **ALL Docker images have been deleted from the registry**
+        
+        ## Cleanup Details
+        
+        - **Workflow**: Clean Registry - Delete All Docker Images
+        - **Run Number**: ${{ github.run_number }}
+        - **Commit**: ${{ github.sha }}
+        - **Date**: $(date -u)
+        - **Action**: Complete registry cleanup
+        
+        ## Current Status
+        
+        Registry is now empty and ready for fresh packages.
+        
+        ## Next Steps
+        
+        1. Run "Recreate Packages with Repository Link" workflow
+        2. Create new packages with proper namespace
+        3. Ensure all packages are public by default
+        
+        ## Warning
+        
+        ⚠️ This action cannot be undone. All packages and their versions are permanently deleted.
+        EOF
+        
+    - name: Commit cleanup status
+      run: |
+        git config --local user.email "action@github.com"
+        git config --local user.name "GitHub Action"
+        git add REGISTRY_CLEANUP.md
+        git commit -m "🗑️ Registry cleanup completed - all Docker images deleted" || echo "No changes to commit"
+        git push
+        
+  safety-check:
+    runs-on: ubuntu-latest
+    if: ${{ inputs.confirm_deletion != 'true' }}
+    steps:
+    - name: Safety Check
+      run: |
+        echo "🛡️ Safety Check - No packages will be deleted"
+        echo "To delete packages, set 'confirm_deletion' to 'true'"
+        echo ""
+        echo "⚠️ WARNING: This action will permanently delete ALL Docker images!"
+        echo "Make sure you really want to do this before proceeding."

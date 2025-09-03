@@ -1,0 +1,214 @@
+name: Create Linked Packages
+
+on:
+  workflow_dispatch:
+    inputs:
+      force_recreate:
+        description: 'Force recreate all packages'
+        required: false
+        default: 'false'
+  push:
+    branches: [ main ]
+    paths:
+      - 'docker/**'
+      - '.github/workflows/create-linked-packages.yml'
+
+jobs:
+  create-packages:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      packages: write
+      id-token: write
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      
+    - name: Setup Docker Buildx
+      uses: docker/setup-buildx-action@v3
+      
+    - name: Log in to GitHub Container Registry
+      uses: docker/login-action@v3
+      with:
+        registry: ghcr.io
+        username: ${{ github.repository_owner }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+        
+    - name: Extract metadata with repository link
+      id: meta
+      uses: docker/metadata-action@v5
+      with:
+        images: |
+          ghcr.io/${{ github.repository_owner }}/ubuntu
+          ghcr.io/${{ github.repository_owner }}/dotnet-sdk
+        tags: |
+          type=ref,event=branch
+          type=ref,event=pr
+          type=sha,prefix={{branch}}-
+          type=raw,value=latest,enable={{is_default_branch}}
+        labels: |
+          org.opencontainers.image.source=https://github.com/${{ github.repository }}
+          org.opencontainers.image.revision=${{ github.sha }}
+          org.opencontainers.image.created=${{ steps.meta.outputs.created }}
+          org.opencontainers.image.description=Docker images from ${{ github.repository }}
+          
+    - name: Build and push Ubuntu LTS with repository link
+      uses: docker/build-push-action@v5
+      with:
+        context: ./docker/ubuntu
+        file: ./docker/ubuntu/Dockerfile.lts
+        push: true
+        tags: |
+          ghcr.io/${{ github.repository_owner }}/ubuntu:lts
+          ghcr.io/${{ github.repository_owner }}/ubuntu:22.04-lts
+          ghcr.io/${{ github.repository_owner }}/ubuntu:lts-${{ github.run_number }}
+        labels: ${{ steps.meta.outputs.labels }}
+        cache-from: type=gha
+        cache-to: type=gha,mode=max
+        
+    - name: Build and push Ubuntu Stable with repository link
+      uses: docker/build-push-action@v5
+      with:
+        context: ./docker/ubuntu
+        file: ./docker/ubuntu/Dockerfile.stable
+        push: true
+        tags: |
+          ghcr.io/${{ github.repository_owner }}/ubuntu:stable
+          ghcr.io/${{ github.repository_owner }}/ubuntu:24.04-stable
+          ghcr.io/${{ github.repository_owner }}/ubuntu:stable-${{ github.run_number }}
+        labels: ${{ steps.meta.outputs.labels }}
+        cache-from: type=gha
+        cache-to: type=gha,mode=max
+        
+    - name: Build and push Ubuntu Preview with repository link
+      uses: docker/build-push-action@v5
+      with:
+        context: ./docker/ubuntu
+        file: ./docker/ubuntu/Dockerfile.preview
+        push: true
+        tags: |
+          ghcr.io/${{ github.repository_owner }}/ubuntu:preview
+          ghcr.io/${{ github.repository_owner }}/ubuntu:24.10-preview
+          ghcr.io/${{ github.repository_owner }}/ubuntu:preview-${{ github.run_number }}
+        labels: ${{ steps.meta.outputs.labels }}
+        cache-from: type=gha
+        cache-to: type=gha,mode=max
+        
+    - name: Build and push .NET SDK LTS with repository link
+      uses: docker/build-push-action@v5
+      with:
+        context: ./docker/dotnet
+        file: ./docker/dotnet/Dockerfile.lts
+        push: true
+        tags: |
+          ghcr.io/${{ github.repository_owner }}/dotnet-sdk:lts
+          ghcr.io/${{ github.repository_owner }}/dotnet-sdk:8.0-lts
+          ghcr.io/${{ github.repository_owner }}/dotnet-sdk:lts-${{ github.run_number }}
+        labels: ${{ steps.meta.outputs.labels }}
+        cache-from: type=gha
+        cache-to: type=gha,mode=max
+        
+    - name: Build and push .NET SDK Stable with repository link
+      uses: docker/build-push-action@v5
+      with:
+        context: ./docker/dotnet
+        file: ./docker/dotnet/Dockerfile.stable
+        push: true
+        tags: |
+          ghcr.io/${{ github.repository_owner }}/dotnet-sdk:stable
+          ghcr.io/${{ github.repository_owner }}/dotnet-sdk:9.0-stable
+          ghcr.io/${{ github.repository_owner }}/dotnet-sdk:stable-${{ github.run_number }}
+        labels: ${{ steps.meta.outputs.labels }}
+        cache-from: type=gha
+        cache-to: type=gha,mode=max
+        
+    - name: Build and push .NET SDK Preview with repository link
+      uses: docker/build-push-action@v5
+      with:
+        context: ./docker/dotnet
+        file: ./docker/dotnet/Dockerfile.preview
+        push: true
+        tags: |
+          ghcr.io/${{ github.repository_owner }}/dotnet-sdk:preview
+          ghcr.io/${{ github.repository_owner }}/dotnet-sdk:10.0-preview
+          ghcr.io/${{ github.repository_owner }}/dotnet-sdk:preview-${{ github.run_number }}
+        labels: ${{ steps.meta.outputs.labels }}
+        cache-from: type=gha
+        cache-to: type=gha,mode=max
+        
+    - name: Make all packages public
+      run: |
+        echo "🔓 Making all packages public..."
+        
+        # Wait a bit for packages to be fully created
+        sleep 10
+        
+        # Make packages public using GitHub API
+        packages=("ubuntu" "dotnet-sdk")
+        
+        for package in "${packages[@]}"; do
+          echo "🔓 Making $package public..."
+          
+          # Use GitHub API to make package public
+          curl -X PUT \
+            -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+            -H "Accept: application/vnd.github.v3+json" \
+            "https://api.github.com/user/packages/container/$package/visibility" \
+            -d '{"visibility":"public"}' || echo "⚠️ Failed to make $package public"
+        done
+        
+    - name: Verify package creation
+      run: |
+        echo "🔍 Verifying packages..."
+        
+        # List all packages
+        curl -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+          -H "Accept: application/vnd.github.v3+json" \
+          "https://api.github.com/user/packages?package_type=container" | jq '.[] | {name: .name, visibility: .visibility, repository: (.repository.name // "none")}'
+        
+    - name: Update package documentation
+      run: |
+        cat > PACKAGE_INFO.md << 'EOF'
+        # Package Information
+        
+        ## Created Packages
+        
+        ### Ubuntu Images
+        - **LTS**: `ghcr.io/606/ubuntu:lts` (linked to repository)
+        - **Stable**: `ghcr.io/606/ubuntu:stable` (linked to repository)
+        - **Preview**: `ghcr.io/606/ubuntu:preview` (linked to repository)
+        
+        ### .NET SDK Images
+        - **LTS**: `ghcr.io/606/dotnet-sdk:lts` (linked to repository)
+        - **Stable**: `ghcr.io/606/dotnet-sdk:stable` (linked to repository)
+        - **Preview**: `ghcr.io/606/dotnet-sdk:preview` (linked to repository)
+        
+        ## Repository Link
+        
+        All packages are now properly linked to this repository:
+        - **Source**: https://github.com/606/docker-images
+        - **Packages**: https://github.com/606?tab=packages
+        
+        ## Usage
+        
+        ```bash
+        # Pull images (no authentication required)
+        docker pull ghcr.io/606/ubuntu:lts
+        docker pull ghcr.io/606/dotnet-sdk:lts
+        ```
+        
+        ## Last Updated
+        
+        - **Workflow**: Create Linked Packages
+        - **Run Number**: ${{ github.run_number }}
+        - **Commit**: ${{ github.sha }}
+        - **Date**: $(date -u)
+        EOF
+        
+    - name: Commit package information
+      run: |
+        git config --local user.email "action@github.com"
+        git config --local user.name "GitHub Action"
+        git add PACKAGE_INFO.md
+        git commit -m "📦 Add package information and repository links" || echo "No changes to commit"
+        git push

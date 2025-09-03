@@ -1,0 +1,73 @@
+name: Fix Package Visibility
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+
+jobs:
+  fix-visibility:
+    runs-on: ubuntu-latest
+    permissions:
+      packages: write
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      
+    - name: Make Ubuntu package public
+      run: |
+        echo "🔓 Making Ubuntu package public..."
+        
+        # Make package public using GitHub API
+        response=$(curl -X PUT \
+          -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+          -H "Accept: application/vnd.github.v3+json" \
+          "https://api.github.com/user/packages/container/docker-images/ubuntu/visibility" \
+          -d '{"visibility":"public"}')
+        
+        if [ $? -eq 0 ]; then
+          echo "✅ Successfully made docker-images/ubuntu public"
+        else
+          echo "⚠️ Failed to make docker-images/ubuntu public: $response"
+        fi
+        
+    - name: Make .NET SDK package public
+      run: |
+        echo "🔓 Making .NET SDK package public..."
+        
+        # Make package public using GitHub API
+        response=$(curl -X PUT \
+          -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+          -H "Accept: application/vnd.github.v3+json" \
+          "https://api.github.com/user/packages/container/docker-images/dotnet-sdk/visibility" \
+          -d '{"visibility":"public"}')
+        
+        if [ $? -eq 0 ]; then
+          echo "✅ Successfully made docker-images/dotnet-sdk public"
+        else
+          echo "⚠️ Failed to make docker-images/dotnet-sdk public: $response"
+        fi
+        
+    - name: Verify visibility
+      run: |
+        echo "🔍 Verifying package visibility..."
+        
+        # Check packages
+        packages_response=$(curl -s -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+          -H "Accept: application/vnd.github.v3+json" \
+          "https://api.github.com/user/packages?package_type=container")
+        
+        echo "📦 Package Status:"
+        echo "$packages_response" | jq -r '.[] | select(.name | contains("docker-images")) | "  📦 \(.name) - \(.visibility) - Repo: \(.repository.name // "none")"'
+        
+    - name: Test public access
+      run: |
+        echo "🧪 Testing public access..."
+        
+        # Test if packages are now publicly accessible
+        if docker pull ghcr.io/606/docker-images/ubuntu:lts >/dev/null 2>&1; then
+          echo "✅ Ubuntu package is now publicly accessible!"
+          docker rmi ghcr.io/606/docker-images/ubuntu:lts >/dev/null 2>&1
+        else
+          echo "❌ Ubuntu package is still not accessible"
+        fi
