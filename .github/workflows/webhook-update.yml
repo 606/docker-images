@@ -1,0 +1,16 @@
+name: Webhook Update
+
+on:
+  repository_dispatch:
+    types: [image-update]
+
+jobs:
+  process-webhook:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Process update
+      run: |
+        echo "Received update for: ${{ github.event.client_payload.image }}"
+        echo "New tag: ${{ github.event.client_payload.tag }}"
+        
+        # Trigger corresponding build workflow

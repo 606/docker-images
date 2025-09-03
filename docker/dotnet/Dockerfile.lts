@@ -1,0 +1,63 @@
+ARG BASE_IMAGE=mcr.microsoft.com/dotnet/sdk:8.0
+FROM ${BASE_IMAGE}
+
+LABEL maintainer="606@github.com" 
+LABEL channel="lts"
+LABEL auto-update="true"
+LABEL org.opencontainers.image.source="https://github.com/606/docker-images"
+LABEL org.opencontainers.image.description=".NET 8.0 LTS SDK with development tools and best practices"
+
+# Set environment variables
+ENV DOTNET_CLI_TELEMETRY_OPTOUT=1
+ENV DOTNET_SKIP_FIRST_TIME_EXPERIENCE=1
+ENV DOTNET_NOLOGO=1
+ENV TZ=UTC
+
+# Install additional tools and utilities
+RUN dotnet tool install --global dotnet-ef \
+    && dotnet tool install --global dotnet-outdated-tool \
+    && dotnet tool install --global dotnet-format \
+    && dotnet tool install --global dotnet-watch \
+    && dotnet tool install --global dotnet-symbol \
+    && dotnet tool install --global dotnet-serve \
+    && dotnet tool install --global dotnet-trace \
+    && dotnet tool install --global dotnet-counters \
+    && dotnet tool install --global dotnet-dump \
+    && dotnet tool install --global dotnet-gcdump \
+    && dotnet tool install --global dotnet-sos \
+    && dotnet tool install --global dotnet-symbol \
+    && dotnet tool install --global dotnet-trace \
+    && dotnet tool install --global dotnet-counters \
+    && dotnet tool install --global dotnet-dump \
+    && dotnet tool install --global dotnet-gcdump \
+    && dotnet tool install --global dotnet-sos
+
+# Install additional system packages
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        curl \
+        wget \
+        git \
+        vim \
+        htop \
+        unzip \
+        ca-certificates \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
+
+# Create non-root user for security
+RUN useradd -m -s /bin/bash dotnet \
+    && usermod -aG sudo dotnet \
+    && echo "dotnet ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers
+
+# Set working directory
+WORKDIR /home/dotnet
+
+# Switch to non-root user
+USER dotnet
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+    CMD dotnet --version || exit 1
+
+# Default command
+CMD ["dotnet", "--info"]

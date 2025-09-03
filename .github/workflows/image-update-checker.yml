@@ -1,0 +1,70 @@
+name: Image Update Checker
+
+on:
+  schedule:
+    # Daily at 6:00 UTC (Ubuntu check)
+    - cron: '0 6 * * *'
+    # Every Tuesday at 20:00 UTC (Microsoft Update Tuesday)
+    - cron: '0 20 * * TUE'
+  workflow_dispatch:
+    inputs:
+      force_update:
+        description: 'Force update all images'
+        required: false
+        default: 'false'
+
+jobs:
+  check-updates:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.check.outputs.matrix }}
+      has_updates: ${{ steps.check.outputs.has_updates }}
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Check for base image updates
+      id: check
+      run: |
+        # Read configuration
+        images_to_update='[]'
+        has_updates=false
+        
+        # Check each image from configuration
+        for image in $(jq -r '.images[] | @base64' .github/configs/images.json); do
+          image_data=$(echo $image | base64 --decode)
+          image_name=$(echo $image_data | jq -r '.name')
+          base_image=$(echo $image_data | jq -r '.base_image')
+          
+          echo "Checking $image_name..."
+          
+          # Check each channel
+          for channel in $(echo $image_data | jq -r '.channels | keys[]'); do
+            tag=$(echo $image_data | jq -r ".channels.$channel.tag")
+            
+            # Use docker-image-update-checker action
+            needs_update=$(docker run --rm -v /var/run/docker.sock:/var/run/docker.sock \
+              lucacome/docker-image-update-checker:latest \
+              --base-image="$base_image:$tag" \
+              --image="ghcr.io/${{ github.repository }}/$image_name:$channel" \
+              --output=json | jq -r '.needs_updating')
+            
+            if [[ "$needs_update" == "true" ]] || [[ "${{ github.event.inputs.force_update }}" == "true" ]]; then
+              echo "Update needed for $image_name:$channel"
+              images_to_update=$(echo $images_to_update | jq ". + [{\"name\": \"$image_name\", \"channel\": \"$channel\", \"tag\": \"$tag\", \"base_image\": \"$base_image\"}]")
+              has_updates=true
+            fi
+          done
+        done
+        
+        echo "matrix=$(echo $images_to_update | jq -c .)" >> $GITHUB_OUTPUT
+        echo "has_updates=$has_updates" >> $GITHUB_OUTPUT
+        echo "Images to update: $images_to_update"
+
+  build-updated-images:
+    needs: check-updates
+    if: needs.check-updates.outputs.has_updates == 'true'
+    uses: ./.github/workflows/build-images.yml
+    with:
+      images_matrix: ${{ needs.check-updates.outputs.matrix }}
+    secrets: inherit

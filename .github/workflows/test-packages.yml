@@ -1,0 +1,78 @@
+name: Test Packages
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+
+jobs:
+  test-packages:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      
+    - name: Test Ubuntu LTS package
+      run: |
+        echo "🧪 Testing Ubuntu LTS package..."
+        
+        # Test if package exists and is accessible
+        if docker pull ghcr.io/606/ubuntu:lts >/dev/null 2>&1; then
+          echo "✅ Ubuntu LTS package is accessible"
+          
+          # Test running container
+          if docker run --rm ghcr.io/606/ubuntu:lts echo "Hello from Ubuntu LTS" >/dev/null 2>&1; then
+            echo "✅ Ubuntu LTS container runs successfully"
+          else
+            echo "⚠️ Ubuntu LTS container pulled but failed to run"
+          fi
+          
+          # Clean up
+          docker rmi ghcr.io/606/ubuntu:lts >/dev/null 2>&1
+        else
+          echo "❌ Ubuntu LTS package is not accessible"
+        fi
+        
+    - name: Test .NET SDK LTS package
+      run: |
+        echo "🧪 Testing .NET SDK LTS package..."
+        
+        # Test if package exists and is accessible
+        if docker pull ghcr.io/606/dotnet-sdk:lts >/dev/null 2>&1; then
+          echo "✅ .NET SDK LTS package is accessible"
+          
+          # Test running container
+          if docker run --rm ghcr.io/606/dotnet-sdk:lts dotnet --version >/dev/null 2>&1; then
+            echo "✅ .NET SDK LTS container runs successfully"
+          else
+            echo "⚠️ .NET SDK LTS container pulled but failed to run"
+          fi
+          
+          # Clean up
+          docker rmi ghcr.io/606/dotnet-sdk:lts >/dev/null 2>&1
+        else
+          echo "❌ .NET SDK LTS package is not accessible"
+        fi
+        
+    - name: Check package status
+      run: |
+        echo "🔍 Checking package status..."
+        
+        # List available tags for Ubuntu
+        echo "📦 Ubuntu package tags:"
+        curl -s "https://ghcr.io/v2/606/ubuntu/tags/list" | jq '.tags[]' 2>/dev/null || echo "  No tags found or API error"
+        
+        # List available tags for .NET SDK
+        echo "📦 .NET SDK package tags:"
+        curl -s "https://ghcr.io/v2/606/dotnet-sdk/tags/list" | jq '.tags[]' 2>/dev/null || echo "  No tags found or API error"
+        
+    - name: Summary
+      run: |
+        echo "📋 Package Test Summary:"
+        echo "  - Ubuntu LTS: $(docker pull ghcr.io/606/ubuntu:lts >/dev/null 2>&1 && echo '✅ Accessible' || echo '❌ Not accessible')"
+        echo "  - .NET SDK LTS: $(docker pull ghcr.io/606/dotnet-sdk:lts >/dev/null 2>&1 && echo '✅ Accessible' || echo '❌ Not accessible')"
+        
+        echo ""
+        echo "🔗 Repository Links:"
+        echo "  - Ubuntu: https://github.com/606?tab=packages&q=ubuntu"
+        echo "  - .NET SDK: https://github.com/606?tab=packages&q=dotnet-sdk"

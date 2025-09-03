@@ -1,0 +1,57 @@
+name: .NET SDK Auto Update
+
+on:
+  schedule:
+    - cron: '0 20 * * TUE'  # Every Tuesday after Microsoft Update Tuesday
+  workflow_dispatch:
+
+jobs:
+  update-dotnet:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Create global.json if not exists
+      run: |
+        if [ ! -f "global.json" ]; then
+          echo "Creating global.json file..."
+          cat > global.json << EOF
+        {
+          "sdk": {
+            "version": "8.0.400",
+            "rollForward": "latestFeature"
+          }
+        }
+        EOF
+          echo "Created global.json with .NET 8.0.400 SDK"
+        else
+          echo "global.json already exists"
+        fi
+    
+    - name: Update .NET SDK
+      uses: martincostello/update-dotnet-sdk@v3
+      with:
+        repo-token: ${{ secrets.GITHUB_TOKEN }}
+        user-email: "606@github.com"
+        user-name: "Update Bot"
+        labels: "dependencies,.NET,automated"
+        sdk-version: "8.0.400"
+    
+    - name: Trigger image rebuild
+      if: success()
+      uses: actions/github-script@v7
+      with:
+        script: |
+          await github.rest.repos.createDispatchEvent({
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            event_type: 'build-images',
+            client_payload: {
+              images_matrix: JSON.stringify([{
+                "name": "dotnet-sdk",
+                "channel": "lts", 
+                "tag": "8.0",
+                "base_image": "mcr.microsoft.com/dotnet/sdk"
+              }])
+            }
+          });
